@@ -1,0 +1,20 @@
+# secrets — never commit keys
+.env
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# run outputs (commit only the curated sample run you submit)
+samples/outputs/*
+!samples/outputs/.gitkeep
+!samples/outputs/submitted/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
