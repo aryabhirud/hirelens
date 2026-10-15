@@ -1,0 +1,366 @@
+{
+  "$defs": {
+    "BulletSuggestion": {
+      "properties": {
+        "original": {
+          "default": "",
+          "title": "Original",
+          "type": "string"
+        },
+        "improved": {
+          "title": "Improved",
+          "type": "string"
+        },
+        "targets": {
+          "default": "",
+          "title": "Targets",
+          "type": "string"
+        }
+      },
+      "required": [
+        "improved"
+      ],
+      "title": "BulletSuggestion",
+      "type": "object"
+    },
+    "CoachingPlan": {
+      "properties": {
+        "bullet_suggestions": {
+          "items": {
+            "$ref": "#/$defs/BulletSuggestion"
+          },
+          "title": "Bullet Suggestions",
+          "type": "array"
+        },
+        "interview_questions": {
+          "items": {
+            "$ref": "#/$defs/InterviewQuestion"
+          },
+          "title": "Interview Questions",
+          "type": "array"
+        },
+        "gap_actions": {
+          "items": {
+            "$ref": "#/$defs/GapAction"
+          },
+          "title": "Gap Actions",
+          "type": "array"
+        }
+      },
+      "title": "CoachingPlan",
+      "type": "object"
+    },
+    "CriticRound": {
+      "properties": {
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "verdict": {
+          "enum": [
+            "approve",
+            "revise"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/CritiqueIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "round",
+        "verdict"
+      ],
+      "title": "CriticRound",
+      "type": "object"
+    },
+    "CritiqueIssue": {
+      "properties": {
+        "section": {
+          "title": "Section",
+          "type": "string"
+        },
+        "claim": {
+          "default": "",
+          "title": "Claim",
+          "type": "string"
+        },
+        "problem": {
+          "title": "Problem",
+          "type": "string"
+        },
+        "suggested_score": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suggested Score"
+        }
+      },
+      "required": [
+        "section",
+        "problem"
+      ],
+      "title": "CritiqueIssue",
+      "type": "object"
+    },
+    "Evidence": {
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "resume_quote": {
+          "title": "Resume Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim",
+        "resume_quote"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "GapAction": {
+      "properties": {
+        "gap": {
+          "title": "Gap",
+          "type": "string"
+        },
+        "action": {
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "gap",
+        "action"
+      ],
+      "title": "GapAction",
+      "type": "object"
+    },
+    "InterviewQuestion": {
+      "properties": {
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "category": {
+          "default": "technical",
+          "title": "Category",
+          "type": "string"
+        },
+        "why_asked": {
+          "default": "",
+          "title": "Why Asked",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "title": "InterviewQuestion",
+      "type": "object"
+    },
+    "SectionScore": {
+      "properties": {
+        "score": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "reasoning": {
+          "default": "",
+          "title": "Reasoning",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "score"
+      ],
+      "title": "SectionScore",
+      "type": "object"
+    }
+  },
+  "description": "What the system produces.",
+  "properties": {
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "aborted"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+    },
+    "candidate_name": {
+      "default": "",
+      "title": "Candidate Name",
+      "type": "string"
+    },
+    "job_title": {
+      "default": "",
+      "title": "Job Title",
+      "type": "string"
+    },
+    "company": {
+      "default": "",
+      "title": "Company",
+      "type": "string"
+    },
+    "overall_score": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Overall Score"
+    },
+    "verdict": {
+      "default": "",
+      "title": "Verdict",
+      "type": "string"
+    },
+    "section_scores": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SectionScore"
+      },
+      "title": "Section Scores",
+      "type": "object"
+    },
+    "weights": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Weights",
+      "type": "object"
+    },
+    "strengths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Strengths",
+      "type": "array"
+    },
+    "matched_must_have": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Matched Must Have",
+      "type": "array"
+    },
+    "skill_gaps": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Skill Gaps",
+      "type": "array"
+    },
+    "nice_to_have_gaps": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Nice To Have Gaps",
+      "type": "array"
+    },
+    "critic_rounds": {
+      "default": 0,
+      "title": "Critic Rounds",
+      "type": "integer"
+    },
+    "critic_approved": {
+      "default": false,
+      "title": "Critic Approved",
+      "type": "boolean"
+    },
+    "critic_summary": {
+      "default": "",
+      "title": "Critic Summary",
+      "type": "string"
+    },
+    "critic_history": {
+      "items": {
+        "$ref": "#/$defs/CriticRound"
+      },
+      "title": "Critic History",
+      "type": "array"
+    },
+    "score_history": {
+      "additionalProperties": {
+        "items": {
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "title": "Score History",
+      "type": "object"
+    },
+    "job_sources": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Job Sources",
+      "type": "array"
+    },
+    "coaching": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CoachingPlan"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "status"
+  ],
+  "title": "FitReport",
+  "type": "object"
+}
