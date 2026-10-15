@@ -1,0 +1,35 @@
+{
+  "description": "What the system accepts. At least one of job_description / job_url is required.",
+  "properties": {
+    "resume_filename": {
+      "title": "Resume Filename",
+      "type": "string"
+    },
+    "resume_text": {
+      "minLength": 1,
+      "title": "Resume Text",
+      "type": "string"
+    },
+    "resume_pages": {
+      "default": 1,
+      "title": "Resume Pages",
+      "type": "integer"
+    },
+    "job_description": {
+      "default": "",
+      "title": "Job Description",
+      "type": "string"
+    },
+    "job_url": {
+      "default": "",
+      "title": "Job Url",
+      "type": "string"
+    }
+  },
+  "required": [
+    "resume_filename",
+    "resume_text"
+  ],
+  "title": "HireLensInput",
+  "type": "object"
+}
