@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HireLens — check your fit before you apply</title>
+  <meta name="description" content="Upload your resume and a job. Six AI agents score your fit section by section, check each other's work, and tell you what to fix.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='14' cy='14' r='9' fill='none' stroke='%232E5BE6' stroke-width='4'/%3E%3Cpath d='M21 21l7 7' stroke='%2316213B' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="masthead">
+    <a class="wordmark" href="/" aria-label="HireLens home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="14" cy="14" r="9"/><path d="M21 21l7 7"/></svg>
+      <span>HireLens</span>
+    </a>
+    <nav class="masthead-nav">
+      <a href="#how">How it works</a>
+      <span class="model-status" id="model-status" data-state="checking">Checking model…</span>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- ============================================================ INPUT -->
+    <section class="view view-intake" id="view-intake" aria-labelledby="intake-title">
+      <div class="intro">
+        <h1 id="intake-title">Know how well you fit a job before you apply.</h1>
+        <p class="lede">Upload your resume and the job. Six AI agents read both, score your fit section by section,
+          check each other’s work, and tell you what to fix.</p>
+      </div>
+
+      <form class="intake" id="intake-form" novalidate>
+        <div class="sheet" id="dropzone">
+          <input type="file" id="resume-input" name="resume" accept="application/pdf,.pdf" class="visually-hidden">
+          <label for="resume-input" class="sheet-target">
+            <svg class="sheet-icon" viewBox="0 0 48 60" aria-hidden="true">
+              <path d="M6 2h26l14 14v40a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+              <path d="M32 2v14h14"/><path d="M12 28h24M12 36h24M12 44h16"/>
+            </svg>
+            <span class="sheet-title" id="sheet-title">Drop your resume here</span>
+            <span class="sheet-hint" id="sheet-hint">PDF, up to 5 MB. Or <u>choose a file</u>.</span>
+          </label>
+          <button type="button" class="sheet-clear" id="resume-clear" hidden>Remove</button>
+        </div>
+
+        <div class="job">
+          <label for="job-text" class="field-label">Job description</label>
+          <textarea id="job-text" name="job_description" rows="9"
+            placeholder="Paste the full job description. The more detail, the more accurate the score."></textarea>
+          <label for="job-url" class="field-label">Job posting link <span class="optional">optional if you paste the description</span></label>
+          <input type="url" id="job-url" name="job_url" inputmode="url" placeholder="https://company.com/careers/role">
+        </div>
+
+        <div class="intake-actions">
+          <button type="submit" class="button-primary" id="submit">Check my fit</button>
+          <p class="samples">
+            No resume handy? <button type="button" class="link" data-sample="full">Try the sample</button>
+            or <button type="button" class="link" data-sample="vague">try a one-line job post</button>
+            and watch the analyst look the role up.
+          </p>
+        </div>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <!-- ============================================================== RUN -->
+    <section class="view view-run" id="view-run" aria-labelledby="run-title" hidden>
+      <div class="run-head">
+        <h2 id="run-title">Reading your resume and the job</h2>
+        <p class="run-status" id="run-status" aria-live="polite">Starting the agents…</p>
+      </div>
+      <div class="run-body">
+        <figure class="agent-map" aria-label="Which agent is working">
+          <svg viewBox="0 0 520 470" id="agent-map" role="img" aria-labelledby="map-title">
+            <title id="map-title">Agent routing map</title>
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+              </marker>
+            </defs>
+            <g class="edges">
+              <path class="edge" data-edge="orchestrator>resume_parser" d="M230 88 L118 168" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="resume_parser>orchestrator" d="M100 168 L212 88" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="orchestrator>job_analyst" d="M290 88 L402 168" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="job_analyst>orchestrator" d="M420 168 L308 88" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="orchestrator>matcher" d="M240 96 L140 290" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="matcher>critic" d="M190 300 Q260 268 330 300" marker-end="url(#arrow)"/>
+              <path class="edge edge-revise" data-edge="critic>matcher" d="M330 336 Q260 368 190 336" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="critic>orchestrator" d="M380 290 L280 96" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="orchestrator>career_coach" d="M260 96 L260 392" marker-end="url(#arrow)"/>
+              <path class="edge" data-edge="career_coach>orchestrator" d="M270 392 L270 96" marker-end="url(#arrow)" opacity="0"/>
+            </g>
+            <g class="nodes">
+              <g class="node" data-agent="orchestrator" transform="translate(260 62)">
+                <circle r="30"/><text class="node-glyph" y="6">⌖</text>
+                <text class="node-label" y="-40">Orchestrator</text>
+                <text class="node-note" y="52"></text>
+              </g>
+              <g class="node" data-agent="resume_parser" transform="translate(90 192)">
+                <circle r="26"/><text class="node-glyph" y="6">¶</text>
+                <text class="node-label" y="48">Resume Parser</text>
+                <text class="node-note" y="66"></text>
+              </g>
+              <g class="node" data-agent="job_analyst" transform="translate(430 192)">
+                <circle r="26"/><text class="node-glyph" y="6">?</text>
+                <text class="node-label" y="48">Job Analyst</text>
+                <text class="node-note" y="66"></text>
+              </g>
+              <g class="node" data-agent="matcher" transform="translate(160 318)">
+                <circle r="28"/><text class="node-glyph" y="6">=</text>
+                <text class="node-label" y="-38">Matcher</text>
+                <text class="node-note" y="50"></text>
+              </g>
+              <g class="node" data-agent="critic" transform="translate(360 318)">
+                <circle r="28"/><text class="node-glyph" y="6">✎</text>
+                <text class="node-label" y="-38">Critic</text>
+                <text class="node-note" y="50"></text>
+              </g>
+              <g class="node" data-agent="career_coach" transform="translate(260 420)">
+                <circle r="26"/><text class="node-glyph" y="6">↑</text>
+                <text class="node-label at-side" x="38" y="5">Career Coach</text>
+                <text class="node-note at-side" x="38" y="22"></text>
+              </g>
+            </g>
+          </svg>
+          <figcaption>The orchestrator plans the run and steps in when something goes wrong. The critic can send the matcher’s scores back for revision.</figcaption>
+        </figure>
+
+        <ol class="log" id="log" aria-label="What the agents are doing"></ol>
+      </div>
+    </section>
+
+    <!-- =========================================================== REPORT -->
+    <section class="view view-report" id="view-report" aria-labelledby="verdict" hidden></section>
+
+    <!-- ============================================================== HOW -->
+    <section class="how" id="how" aria-labelledby="how-title">
+      <h2 id="how-title">How it works</h2>
+      <p class="how-lede">One model asked to grade a resume will happily grade its own work. HireLens splits the job
+        between six agents so that each claim gets checked by someone else.</p>
+      <dl class="roster">
+        <div><dt><span class="dot" data-agent="orchestrator"></span>Orchestrator</dt>
+          <dd>Plans each run, reads every result, and changes the plan when something looks wrong: a resume that didn’t parse well, a job with no clear requirements, an agent that failed.</dd></div>
+        <div><dt><span class="dot" data-agent="resume_parser"></span>Resume Parser</dt>
+          <dd>Turns your PDF into skills, experience, projects and education, and says how confident it is.</dd></div>
+        <div><dt><span class="dot" data-agent="job_analyst"></span>Job Analyst</dt>
+          <dd>Separates what the role requires from what’s nice to have. If the post is vague, it searches the company’s careers page on its own.</dd></div>
+        <div><dt><span class="dot" data-agent="matcher"></span>Matcher</dt>
+          <dd>Scores skills, experience, projects, education and keywords, quoting your resume for every claim.</dd></div>
+        <div><dt><span class="dot" data-agent="critic"></span>Critic</dt>
+          <dd>Checks every quote against your actual resume and sends inflated scores back to the matcher to revise.</dd></div>
+        <div><dt><span class="dot" data-agent="career_coach"></span>Career Coach</dt>
+          <dd>Rewrites your bullets around the role, predicts interview questions, and suggests how to close each gap.</dd></div>
+      </dl>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>An honest first check, not a guarantee of selection. Your resume is used for this analysis only and isn’t stored.</p>
+    <p class="team">Built by Arya Sanjay Bhirud, Aryan Choudhary and Arun Tati.</p>
+  </footer>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
