@@ -1,0 +1,27 @@
+Backend Engineering Intern — Nimbus Analytics (Pune, hybrid, 6 months)
+
+About the role
+Nimbus Analytics builds data pipelines and dashboards for mid-size retailers. As a backend intern you will work
+with our platform team on the APIs that power customer dashboards.
+
+What you'll do
+- Build and maintain REST APIs in Python
+- Write and optimise SQL queries against PostgreSQL
+- Containerise services and help maintain our CI pipelines
+- Write unit and integration tests for new features
+- Take part in code reviews and sprint planning
+
+Must have
+- Strong Python programming skills
+- Experience building REST APIs (FastAPI, Django or Flask)
+- Good working knowledge of SQL and relational databases (PostgreSQL preferred)
+- Familiarity with Git and code review workflows
+- Pursuing or recently completed a B.Tech/B.E. in Computer Science or a related field
+
+Good to have
+- Docker and basic Kubernetes
+- Experience with message queues such as Kafka or RabbitMQ
+- Exposure to AWS or GCP
+- Experience with Redis caching
+
+Stipend: competitive. Duration: 6 months, starting January 2027.
