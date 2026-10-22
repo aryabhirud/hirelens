@@ -22,6 +22,8 @@ class SupportsChatJSON(Protocol):
     def chat_json(self, agent: str, system: str, user: str, max_tokens: int = 2500) -> dict[str, Any]: ...
 
 
+MAX_TOKEN_BUDGET = 8000
+
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 
@@ -73,11 +75,19 @@ class LLMClient:
         from openai import APIConnectionError, APIStatusError, RateLimitError
 
         messages = [
-            {"role": "system", "content": system + "\n\nRespond with a single JSON object only."},
+            {"role": "system", "content": system + "\n\nRespond with a single JSON object only. Keep every text field brief."},
             {"role": "user", "content": user},
         ]
         last_error: Exception | None = None
         text = ""
+        cap = self.settings.max_output_tokens or MAX_TOKEN_BUDGET
+        budget = min(max_tokens, cap)
+        extra = dict(self.settings.extra_body)
+        if self.settings.reasoning_effort:
+            extra["reasoning_effort"] = self.settings.reasoning_effort
+        options = {"response_format": {"type": "json_object"}} if self.settings.json_mode else {}
+        if extra:
+            options["extra_body"] = extra
         for attempt in range(self.max_retries + 1):
             self._respect_rate_limit()
             try:
@@ -86,9 +96,17 @@ class LLMClient:
                     model=self.settings.model_for(agent),
                     messages=messages,
                     temperature=AGENT_TEMPERATURE.get(agent, 0.2),
-                    max_tokens=max_tokens,
+                    max_tokens=budget,
+                    **options,
                 )
-                text = response.choices[0].message.content or ""
+                choice = response.choices[0]
+                text = choice.message.content or ""
+                if not text.strip():
+                    # Reasoning models can spend the whole token budget thinking and return no answer.
+                    # Give the next attempt more room instead of asking the model to "repair" nothing.
+                    last_error = ValueError(f"empty model reply (finish_reason={choice.finish_reason})")
+                    budget = min(budget * 2, cap)
+                    continue
                 return extract_json(text)
             except ValueError as exc:  # malformed JSON: ask the model to repair it
                 last_error = exc
