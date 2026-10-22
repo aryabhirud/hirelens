@@ -3,7 +3,7 @@ import pytest
 from pydantic import ValidationError
 
 from lib.config import load_settings
-from lib.llm import LLMClient, LLMError, extract_json
+from lib.llm import LLMClient, LLMError, QuotaExhausted, extract_json, is_daily_quota_error
 from lib.schemas import Critique, HireLensInput, JobProfile, MatchResult, ResumeProfile, SectionScore
 
 
@@ -143,3 +143,57 @@ def test_output_token_cap_limits_every_request():
     client, fake = _client_with([("", "length"), ('{"ok": 1}', "stop")], max_output_tokens=900)
     client.chat_json("matcher", "sys", "user", max_tokens=3500)
     assert [r["max_tokens"] for r in fake.requests] == [900, 900]
+
+
+# ------------------------------------------------- rate limits: per-minute vs per-day
+def _rate_limit(message):
+    import httpx
+    from openai import RateLimitError
+
+    request = httpx.Request("POST", "http://unused/chat/completions")
+    return RateLimitError(message, response=httpx.Response(429, request=request), body=None)
+
+
+class _Raising:
+    def __init__(self, errors_then_reply):
+        self.items, self.requests = list(errors_then_reply), []
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        item = self.items.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return type("R", (), {"choices": [_Choice(item)]})()
+
+
+def _client_raising(items):
+    client, _ = _client_with([])
+    fake = _Raising(items)
+    client._client = type("C", (), {"chat": type("Ch", (), {"completions": fake})()})()
+    return client, fake
+
+
+def test_daily_quota_stops_at_once_without_waiting(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("lib.llm.time.sleep", sleeps.append)
+    gemini = _rate_limit("Error code: 429 - quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    client, fake = _client_raising([gemini, '{"never": "reached"}'])
+    with pytest.raises(QuotaExhausted, match="daily quota"):
+        client.chat_json("orchestrator", "sys", "user")
+    assert len(fake.requests) == 1 and not [s for s in sleeps if s > 1]
+
+
+def test_per_minute_limit_is_still_retried(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("lib.llm.time.sleep", sleeps.append)
+    groq_tpm = _rate_limit("Rate limit reached on tokens per minute (TPM): Limit 1000, Requested 1217")
+    client, fake = _client_raising([groq_tpm, '{"ok": 1}'])
+    assert client.chat_json("matcher", "sys", "user") == {"ok": 1}
+    assert len(fake.requests) == 2 and 8 in sleeps
+
+
+def test_daily_quota_detection_covers_groq_and_gemini():
+    assert is_daily_quota_error(Exception("Limit reached on requests per day (RPD)"))
+    assert is_daily_quota_error(Exception("tokens per day (TPD): Limit 100000"))
+    assert is_daily_quota_error(Exception("GenerateRequestsPerDayPerProjectPerModel-FreeTier"))
+    assert not is_daily_quota_error(Exception("GenerateRequestsPerMinutePerProjectPerModel-FreeTier"))

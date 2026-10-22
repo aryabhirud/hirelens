@@ -152,3 +152,15 @@ def test_analyze_rejects_bad_input_before_streaming(client):
     files = {"resume": ("resume.pdf", b"not a pdf", "application/pdf")}
     res = client.post("/api/analyze", files=files, data={"job_description": "Python developer"})
     assert res.status_code == 400 and "not a PDF" in res.json()["error"]["message"]
+
+
+def test_analyze_reports_used_up_daily_quota_clearly(client, job_text):
+    from lib.llm import QUOTA_MESSAGE, QuotaExhausted
+
+    app.state.llm_factory = lambda _s: ScriptedLLM(_happy_script(orchestrator=[QuotaExhausted(QUOTA_MESSAGE)]))
+    files = {"resume": ("resume.pdf", SAMPLE_PDF.read_bytes(), "application/pdf")}
+    with client.stream("POST", "/api/analyze", files=files, data={"job_description": job_text}) as res:
+        events = _sse_events("".join(res.iter_text()))
+    done = events[-1][1]
+    assert events[-1][0] == "done" and done["status"] == "failed"
+    assert "daily quota" in done["error"] and done["report"] is None

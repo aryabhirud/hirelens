@@ -18,6 +18,24 @@ class LLMError(RuntimeError):
     """Raised when the model cannot produce a usable answer after retries."""
 
 
+class QuotaExhausted(LLMError):
+    """The provider's daily quota is used up. Retrying within this run cannot help, so the run stops."""
+
+
+QUOTA_MESSAGE = (
+    "The AI model's free daily quota is used up, so HireLens cannot analyse right now. "
+    "It resets once a day (Gemini: midnight Pacific time, about 12:30 PM IST). "
+    "Try again after that, or configure a different API key or model."
+)
+
+# Daily limits: Gemini "GenerateRequestsPerDayPerProjectPerModel", Groq "requests per day (RPD)" / "(TPD)".
+_DAILY_LIMIT = re.compile(r"per[\s_-]?day|\b(?:rpd|tpd)\b", re.IGNORECASE)
+
+
+def is_daily_quota_error(exc: Exception) -> bool:
+    return bool(_DAILY_LIMIT.search(str(exc)))
+
+
 class SupportsChatJSON(Protocol):
     def chat_json(self, agent: str, system: str, user: str, max_tokens: int = 2500) -> dict[str, Any]: ...
 
@@ -61,7 +79,8 @@ class LLMClient:
 
         self.settings = settings
         self.max_retries = max_retries
-        self._client = OpenAI(api_key=settings.api_key, base_url=settings.base_url, timeout=90)
+        self._client = OpenAI(api_key=settings.api_key, base_url=settings.base_url, timeout=90, max_retries=0)
+        # max_retries=0: this class does its own retrying and must stop at once on a daily quota.
         self._last_call = 0.0
         self.calls = 0
 
@@ -115,6 +134,8 @@ class LLMClient:
                     {"role": "user", "content": "That was not valid JSON. Reply again with only the JSON object."}
                 )
             except RateLimitError as exc:
+                if is_daily_quota_error(exc):
+                    raise QuotaExhausted(QUOTA_MESSAGE) from exc
                 last_error = exc
                 time.sleep(min(60, 8 * (2**attempt)))
             except APIConnectionError as exc:

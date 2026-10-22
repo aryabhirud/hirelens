@@ -21,7 +21,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agents import career_coach, critic, job_analyst, matcher, orchestrator, resume_parser
 from agents.base import AgentContext, PipelineState
-from lib.llm import LLMError
+from lib.llm import LLMError, QuotaExhausted
 from lib.schemas import CoachingPlan, FitReport, HireLensInput, SectionScore
 from lib.scoring import WEIGHTS, overall_score, verdict_label
 from tools.errors import ToolError
@@ -43,6 +43,8 @@ def _worker_node(name: str, fn: Callable, ctx: AgentContext) -> Callable[[Pipeli
         attempts[name] = attempts.get(name, 0) + 1
         try:
             updates = fn(ctx, state)
+        except QuotaExhausted:
+            raise  # no agent can work without the model; stop the whole run now
         except (LLMError, ToolError, KeyError, ValueError) as exc:
             ctx.trace.log(name, "error", f"{name} failed: {exc}", {"error": str(exc), "attempt": attempts[name]})
             ctx.trace.handoff(name, "orchestrator", "reporting failure")
@@ -98,7 +100,16 @@ def run_pipeline(inp: HireLensInput, ctx: AgentContext) -> FitReport:
     if not inp.job_description.strip() and not inp.job_url.strip():
         raise ValueError("Provide a job description or a job posting URL.")
     app = build_graph(ctx)
-    final_state = app.invoke(
+    try:
+        final_state = _invoke(app, inp)
+    except QuotaExhausted as exc:
+        ctx.trace.log("orchestrator", "error", f"Run stopped: {exc}", {"reason": "daily_quota_exhausted"})
+        raise
+    return FitReport.model_validate(final_state["report"])
+
+
+def _invoke(app, inp: HireLensInput) -> dict:
+    return app.invoke(
         {
             "resume_filename": inp.resume_filename,
             "resume_text": inp.resume_text,
@@ -108,7 +119,6 @@ def run_pipeline(inp: HireLensInput, ctx: AgentContext) -> FitReport:
         },
         config={"recursion_limit": 60},
     )
-    return FitReport.model_validate(final_state["report"])
 
 
 def build_report(ctx: AgentContext, state: PipelineState) -> FitReport:
