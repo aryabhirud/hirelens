@@ -2,7 +2,12 @@
 
 Endpoints
   GET  /api/health                     is the model configured, which agents exist
-  POST /api/runs                       multipart: resume (PDF), job_description, job_url → {run_id}
+  POST /api/analyze                    multipart: resume (PDF), job_description, job_url → runs the analysis
+                                       in this request and streams every trace event (SSE), then "done" with
+                                       the report and the full trace. Used by the web app; works on serverless
+                                       hosts such as Vercel, where a run must finish inside one request.
+  POST /api/runs                       same input → {run_id}; the run continues in the background
+                                       (for long-lived servers and the CLI-style API)
   GET  /api/runs/{id}                  status, report, error
   GET  /api/runs/{id}/events           Server-Sent Events: live trace events, then "done"
   GET  /api/runs/{id}/trace?format=…   download the execution trace (json | md)
@@ -87,13 +92,8 @@ def sample_resume() -> Response:
                     headers={"Content-Disposition": 'inline; filename="sample_resume.pdf"'})
 
 
-@app.post("/api/runs", status_code=202)
-async def create_run(
-    request: Request,
-    resume: UploadFile = File(...),
-    job_description: str = Form(""),
-    job_url: str = Form(""),
-) -> dict:
+async def _prepare_run(request: Request, resume: UploadFile, job_description: str, job_url: str):
+    """Validate the upload and job input; return (input, client id, settings) or raise a clear HTTP error."""
     settings: Settings = app.state.settings_loader()
     if not settings.api_key:
         raise _error(503, "The server has no model API key configured. Add GEMINI_API_KEY to the environment.")
@@ -120,7 +120,66 @@ async def create_run(
 
     inp = HireLensInput(resume_filename=resume.filename or "resume.pdf", resume_text=resume_text,
                         resume_pages=pages, job_description=job_description, job_url=job_url)
-    run = store.start(inp, client, settings, app.state.llm_factory, background=app.state.background)
+    return inp, client, settings
+
+
+def _sse(event: str, payload: dict, event_id: int | None = None) -> str:
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+@app.post("/api/analyze")
+async def analyze(
+    request: Request,
+    resume: UploadFile = File(...),
+    job_description: str = Form(""),
+    job_url: str = Form(""),
+) -> StreamingResponse:
+    """Run one analysis inside this request and stream it back.
+
+    The response stays open while the agents work, so the run never depends on a
+    second request reaching the same server instance (serverless-safe).
+    """
+    inp, client, settings = await _prepare_run(request, resume, job_description, job_url)
+    run = app.state.store.start(inp, client, settings, app.state.llm_factory, background=app.state.background)
+
+    async def generator():
+        index, idle = 0, 0.0
+        yield _sse("started", {"run_id": run.id})
+        while True:
+            new = run.events_since(index)
+            for event in new:
+                index += 1
+                yield _sse("trace", event, index)
+            if new:
+                idle = 0.0
+            elif run.finished:
+                yield _sse("done", {"run_id": run.id, "status": run.status, "report": run.report,
+                                    "error": run.error, "trace": run.trace.to_dict(),
+                                    "trace_markdown": run.trace.to_markdown()})
+                return
+            else:
+                await asyncio.sleep(0.25)
+                idle += 0.25
+                if idle >= 15:
+                    idle = 0.0
+                    yield ": keep-alive\n\n"
+
+    return StreamingResponse(generator(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@app.post("/api/runs", status_code=202)
+async def create_run(
+    request: Request,
+    resume: UploadFile = File(...),
+    job_description: str = Form(""),
+    job_url: str = Form(""),
+) -> dict:
+    inp, client, settings = await _prepare_run(request, resume, job_description, job_url)
+    run = app.state.store.start(inp, client, settings, app.state.llm_factory, background=app.state.background)
     return {"run_id": run.id, "events_url": f"/api/runs/{run.id}/events"}
 
 
@@ -167,8 +226,7 @@ async def stream_events(run_id: str, request: Request) -> StreamingResponse:
                     idle = 0.0
                     yield ": keep-alive\n\n"
 
-    return StreamingResponse(generator(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(generator(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @app.get("/api/runs/{run_id}/trace")

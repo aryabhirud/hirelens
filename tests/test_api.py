@@ -112,3 +112,43 @@ def test_failed_run_reports_error_instead_of_hanging(client, job_text):
 def test_unknown_run_is_404(client):
     res = client.get("/api/runs/nope")
     assert res.status_code == 404 and "Start a new one" in res.json()["error"]["message"]
+
+
+# --------------------------------------------------- single-request stream
+def _sse_events(body: str) -> list[tuple[str, dict]]:
+    events = []
+    for block in body.replace("\r\n", "\n").split("\n\n"):
+        name, data = "message", []
+        for line in block.split("\n"):
+            if line.startswith("event:"):
+                name = line[6:].strip()
+            elif line.startswith("data:"):
+                data.append(line[5:].strip())
+        if data:
+            events.append((name, json.loads("\n".join(data))))
+    return events
+
+
+def test_analyze_runs_and_streams_in_one_request(client, job_text):
+    files = {"resume": ("resume.pdf", SAMPLE_PDF.read_bytes(), "application/pdf")}
+    with client.stream("POST", "/api/analyze", files=files, data={"job_description": job_text}) as res:
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/event-stream")
+        events = _sse_events("".join(res.iter_text()))
+
+    names = [name for name, _ in events]
+    assert names[0] == "started" and names[-1] == "done"
+    traces = [payload for name, payload in events if name == "trace"]
+    assert {e["agent"] for e in traces} >= {"orchestrator", "resume_parser", "job_analyst", "matcher", "critic",
+                                            "career_coach"}
+    done = events[-1][1]
+    assert done["status"] == "completed" and done["report"]["overall_score"] == 74
+    # the final event carries everything the browser needs for downloads
+    assert done["trace"]["event_count"] == len(traces)
+    assert "| orchestrator |" in done["trace_markdown"]
+
+
+def test_analyze_rejects_bad_input_before_streaming(client):
+    files = {"resume": ("resume.pdf", b"not a pdf", "application/pdf")}
+    res = client.post("/api/analyze", files=files, data={"job_description": "Python developer"})
+    assert res.status_code == 400 and "not a PDF" in res.json()["error"]["message"]

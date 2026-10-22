@@ -76,3 +76,70 @@ def test_resume_profile_confidence_must_be_a_probability():
 def test_input_requires_resume_text():
     with pytest.raises(ValidationError):
         HireLensInput(resume_filename="r.pdf", resume_text="")
+
+
+# ------------------------------------------------- client retry behaviour
+class _Msg:
+    def __init__(self, content):
+        self.content = content
+
+
+class _Choice:
+    def __init__(self, content, finish_reason="stop"):
+        self.message, self.finish_reason = _Msg(content), finish_reason
+
+
+class _FakeCompletions:
+    def __init__(self, replies):
+        self.replies, self.requests = list(replies), []
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        content, reason = self.replies.pop(0)
+        return type("R", (), {"choices": [_Choice(content, reason)]})()
+
+
+def _client_with(replies, **settings):
+    from lib.config import Settings
+
+    client = LLMClient(Settings(api_key="k", base_url="http://unused", default_model="m", **settings), max_retries=2)
+    fake = _FakeCompletions(replies)
+    client._client = type("C", (), {"chat": type("Ch", (), {"completions": fake})()})()
+    return client, fake
+
+
+def test_empty_reply_retries_with_a_bigger_token_budget():
+    client, fake = _client_with([("", "length"), ('{"ok": true}', "stop")])
+    assert client.chat_json("matcher", "sys", "user", max_tokens=1000) == {"ok": True}
+    assert [r["max_tokens"] for r in fake.requests] == [1000, 2000]
+
+
+def test_reasoning_effort_is_sent_only_when_configured():
+    client, fake = _client_with([('{"a": 1}', "stop")], reasoning_effort="low")
+    client.chat_json("critic", "sys", "user")
+    assert fake.requests[0]["extra_body"] == {"reasoning_effort": "low"}
+
+    client, fake = _client_with([('{"a": 1}', "stop")])
+    client.chat_json("critic", "sys", "user")
+    assert "extra_body" not in fake.requests[0]
+
+
+def test_json_mode_and_extra_options_are_passed_through():
+    client, fake = _client_with([('{"a": 1}', "stop")], json_mode=True,
+                                extra_body={"reasoning_format": "hidden"})
+    client.chat_json("matcher", "sys", "user")
+    request = fake.requests[0]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["extra_body"] == {"reasoning_format": "hidden"}
+
+
+def test_extra_body_env_must_be_json(monkeypatch):
+    monkeypatch.setenv("HIRELENS_EXTRA_BODY", "not json")
+    with pytest.raises(ValueError, match="JSON object"):
+        load_settings()
+
+
+def test_output_token_cap_limits_every_request():
+    client, fake = _client_with([("", "length"), ('{"ok": 1}', "stop")], max_output_tokens=900)
+    client.chat_json("matcher", "sys", "user", max_tokens=3500)
+    assert [r["max_tokens"] for r in fake.requests] == [900, 900]

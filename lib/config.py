@@ -9,6 +9,7 @@ Any OpenAI-compatible endpoint works. Two presets are provided:
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 
@@ -54,9 +55,24 @@ class Settings:
     min_call_interval: float = 0.0  # seconds between LLM calls (free-tier RPM)
     max_critic_revisions: int = 2
     max_analyst_steps: int = 4
+    reasoning_effort: str | None = None  # for reasoning models (e.g. gpt-oss on Groq): low | medium | high
+    max_output_tokens: int | None = None  # hard cap on reply length (some free tiers limit output tokens per minute)
+    json_mode: bool = False               # ask the provider for a guaranteed JSON object reply
+    extra_body: dict = field(default_factory=dict)  # provider-specific options, e.g. {"reasoning_format": "hidden"}
 
     def model_for(self, agent: str) -> str:
         return self.agent_models.get(agent) or self.default_model
+
+
+def _json_env(name: str) -> dict:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{name} must be a JSON object, e.g. {{\"reasoning_format\": \"hidden\"}}") from exc
+    return value if isinstance(value, dict) else {}
 
 
 def load_settings(api_key_override: str | None = None, provider_override: str | None = None) -> Settings:
@@ -80,4 +96,8 @@ def load_settings(api_key_override: str | None = None, provider_override: str | 
         min_call_interval=float(os.getenv("HIRELENS_MIN_CALL_INTERVAL", "0")),
         max_critic_revisions=int(os.getenv("HIRELENS_MAX_CRITIC_REVISIONS", "2")),
         max_analyst_steps=int(os.getenv("HIRELENS_MAX_ANALYST_STEPS", "4")),
+        reasoning_effort=os.getenv("HIRELENS_REASONING_EFFORT") or None,
+        max_output_tokens=int(os.getenv("HIRELENS_MAX_OUTPUT_TOKENS", "0")) or None,
+        json_mode=os.getenv("HIRELENS_JSON_MODE", "").strip().lower() in {"1", "true", "yes"},
+        extra_body=_json_env("HIRELENS_EXTRA_BODY"),
     )
