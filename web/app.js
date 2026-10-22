@@ -47,17 +47,16 @@ const ACTIVITY = {
   career_coach: "Writing your suggestions",
 };
 const QUIET_EVENTS = new Set(["tool_result", "handoff"]);
-const MAX_PDF_BYTES = 5 * 1024 * 1024;
+const MAX_PDF_BYTES = 4 * 1024 * 1024; // the hosting platform accepts uploads up to about 4.5 MB
 
 const state = {
   file: null,
   runId: null,
-  source: null,
+  result: null,
   events: [],
   seen: new Set(),
   active: null,
   errored: new Set(),
-  streamErrors: 0,
 };
 
 // ---------------------------------------------------------------- views
@@ -118,13 +117,13 @@ function setFile(file) {
     $("#resume-input").value = "";
     sheet.classList.remove("has-file");
     title.textContent = "Drop your resume here";
-    hint.replaceChildren("PDF, up to 5 MB. Or ", h("u", {}, "choose a file"), ".");
+    hint.replaceChildren("PDF, up to 4 MB. Or ", h("u", {}, "choose a file"), ".");
     $("#resume-clear").hidden = true;
     return;
   }
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
   if (!isPdf) return showError("That file isn’t a PDF. Export your resume as a PDF and try again.");
-  if (file.size > MAX_PDF_BYTES) return showError("That PDF is larger than 5 MB. Export a smaller version and try again.");
+  if (file.size > MAX_PDF_BYTES) return showError("That PDF is larger than 4 MB. Export a smaller version and try again.");
   hideError();
   state.file = file;
   sheet.classList.add("has-file");
@@ -187,17 +186,24 @@ async function onSubmit(event) {
   body.append("resume", state.file);
   body.append("job_description", jobText);
   body.append("job_url", jobUrl);
+  let res;
   try {
-    const res = await fetch("/api/runs", { method: "POST", body });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error?.message || `HireLens returned an error (${res.status}). Try again.`);
-    startRun(data.run_id);
-  } catch (err) {
-    showError(err instanceof TypeError ? "Couldn’t reach HireLens. Check your connection and try again." : err.message);
-  } finally {
+    res = await fetch("/api/analyze", { method: "POST", body });
+  } catch {
     button.disabled = false;
     button.textContent = "Check my fit";
+    return showError("Couldn’t reach HireLens. Check your connection and try again.");
   }
+  button.disabled = false;
+  button.textContent = "Check my fit";
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    const fallback = res.status === 413
+      ? "That PDF is too large to upload. Export a smaller version (under 4 MB) and try again."
+      : `HireLens returned an error (${res.status}). Try again.`;
+    return showError(data?.error?.message || fallback);
+  }
+  streamRun(res);
 }
 
 // ------------------------------------------------------------ live run
@@ -206,7 +212,6 @@ function resetRun() {
   state.seen = new Set();
   state.active = null;
   state.errored = new Set();
-  state.streamErrors = 0;
   $("#log").replaceChildren();
   $("#run-title").textContent = "Reading your resume and the job";
   $("#run-status").textContent = "Starting the agents…";
@@ -217,35 +222,50 @@ function resetRun() {
   for (const edge of $$("#agent-map .edge")) edge.classList.remove("is-live", "is-used");
 }
 
-function startRun(runId) {
-  state.runId = runId;
+// The analysis runs inside the POST request, and the server streams Server-Sent
+// Events back on the same connection. EventSource only does GET, so the stream is
+// read with fetch and parsed here. One request means it also works on serverless hosts.
+async function streamRun(res) {
+  state.runId = null;
+  state.result = null;
   resetRun();
   showView("run");
-  if (state.source) state.source.close();
-  const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);
-  state.source = source;
-  source.addEventListener("trace", (msg) => {
-    state.streamErrors = 0;
-    onTrace(JSON.parse(msg.data));
-  });
-  source.addEventListener("done", (msg) => {
-    source.close();
-    onDone(JSON.parse(msg.data));
-  });
-  source.onerror = async () => {
-    state.streamErrors += 1;
-    if (state.streamErrors < 6) return; // EventSource reconnects by itself and resumes from the last event
-    source.close();
-    try {
-      const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message);
-      if (["completed", "aborted", "failed"].includes(data.status)) onDone(data);
-      else setTimeout(() => startRun(runId), 2000);
-    } catch (err) {
-      renderFailure(err.message || "The connection to HireLens was lost.");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+  const handle = (block) => {
+    let event = "message";
+    const data = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
     }
+    if (!data.length) return;
+    const payload = JSON.parse(data.join("\n"));
+    if (event === "started") state.runId = payload.run_id;
+    else if (event === "trace") onTrace(payload);
+    else if (event === "done") { finished = true; onDone(payload); }
   };
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      let cut;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        handle(buffer.slice(0, cut));
+        buffer = buffer.slice(cut + 2);
+      }
+    }
+    if (buffer.trim()) handle(buffer);
+  } catch {
+    // connection dropped; reported below
+  }
+  if (!finished) {
+    renderFailure("The connection to HireLens closed before the analysis finished. "
+      + "The server may have hit its time limit. Try again, ideally with the job description pasted in.");
+  }
 }
 
 function humanize(text) {
@@ -349,7 +369,7 @@ function updateMap(ev) {
 }
 
 function onDone(payload) {
-  if (state.source) state.source.close();
+  state.result = payload;
   if (payload.status === "failed" || !payload.report) {
     renderFailure(payload.error || "The analysis stopped unexpectedly.");
   } else {
@@ -366,13 +386,22 @@ function bandOf(verdict = "") {
   return "poor";
 }
 
-function downloads(runId) {
-  const base = `/api/runs/${encodeURIComponent(runId)}`;
+function fileLink(label, filename, content, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  return h("a", { class: "button-secondary", href: url, download: filename }, label);
+}
+
+// The report and trace arrive with the final "done" event, so downloads are
+// built in the browser and never depend on the server remembering the run.
+function downloads() {
+  const r = state.result;
+  if (!r) return [];
+  const id = r.run_id || "run";
   return [
-    h("a", { class: "button-secondary", href: `${base}/report`, download: "" }, "Download report"),
-    h("a", { class: "button-secondary", href: `${base}/trace?format=json`, download: "" }, "Download trace (JSON)"),
-    h("a", { class: "button-secondary", href: `${base}/trace?format=md`, download: "" }, "Download trace (Markdown)"),
-  ];
+    r.report ? fileLink("Download report", `hirelens_report_${id}.json`, JSON.stringify(r.report, null, 2), "application/json") : null,
+    r.trace ? fileLink("Download trace (JSON)", `hirelens_trace_${id}.json`, JSON.stringify(r.trace, null, 2), "application/json") : null,
+    r.trace_markdown ? fileLink("Download trace (Markdown)", `hirelens_trace_${id}.md`, r.trace_markdown, "text/markdown") : null,
+  ].filter(Boolean);
 }
 
 function againButton(label) {
@@ -388,7 +417,7 @@ function renderFailure(message) {
     h("h2", {}, "The analysis didn’t finish"),
     h("p", {}, message),
     h("p", {}, "Nothing was saved. You can try again; if the model is busy, wait a minute first."),
-    h("div", { class: "report-foot" }, againButton("Try again"), state.runId ? downloads(state.runId).slice(1) : null)));
+    h("div", { class: "report-foot" }, againButton("Try again"), downloads())));
   showView("report");
 }
 
@@ -399,7 +428,7 @@ function renderReport(r) {
       h("h2", { id: "verdict" }, "We stopped before scoring"),
       h("p", {}, r.message),
       r.warnings?.length ? h("div", { class: "warnings" }, r.warnings.map((w) => h("p", {}, w))) : null,
-      h("div", { class: "report-foot" }, againButton("Change the inputs"), downloads(r.run_id).slice(1))));
+      h("div", { class: "report-foot" }, againButton("Change the inputs"), downloads())));
     showView("report");
     return;
   }
@@ -428,7 +457,7 @@ function renderReport(r) {
     sectionRows(r),
     fitLists(r),
     coachTabs(r),
-    h("div", { class: "report-foot" }, againButton("Check another job"), h("span", { class: "spacer" }), downloads(r.run_id)),
+    h("div", { class: "report-foot" }, againButton("Check another job"), h("span", { class: "spacer" }), downloads()),
   );
   showView("report");
 }
