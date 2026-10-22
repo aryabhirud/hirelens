@@ -112,7 +112,7 @@ If more than half of the must-have requirements are missing, the overall score i
 - **Bad input:** non-PDF, empty, corrupted, encrypted, scanned/image-only PDFs, files over 5 MB, missing job input, invalid or private URLs — each gives a clear message (HTTP 400/413), never a crash.
 - **Load:** one running analysis per visitor and a global cap (HTTP 429 with a clear message), so a demo cannot exhaust the free-tier API key.
 - **Tool failures:** a failed fetch or search is fed back to the Job Analyst as an observation, and it chooses another approach.
-- **LLM failures:** rate limits are retried with backoff; invalid JSON is sent back to the model for repair; schema-invalid output is retried once with the validation error.
+- **LLM failures:** per-minute rate limits are retried with backoff. A used-up daily quota is not retried: the client switches to the next backup key (then any fallback model) within the same call and remembers the used-up key for later runs; when every key is used up, the run stops at once with a clear message instead of running into the hosting time limit; invalid JSON is sent back to the model for repair; schema-invalid output is retried once with the validation error.
 - **Partial failure:** if the Critic fails, scores are shown marked unverified; if the Coach fails, the scores are still returned.
 - **Loops are bounded:** at most 2 revisions, at most 4 analyst tool steps, at most 2 attempts per agent, and a LangGraph recursion limit, so a run finishes well inside the hosting time limit. If the connection still closes early, the browser says so instead of waiting forever.
 

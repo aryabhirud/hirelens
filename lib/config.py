@@ -1,7 +1,11 @@
 """Runtime configuration for HireLens.
 
-Settings come from environment variables (or a local .env file). On Hugging
-Face Spaces or Render, set the same keys as secrets / environment variables.
+Settings come from environment variables (or a local .env file). On Vercel or
+any other host, set the same names as environment variables.
+
+Free tiers have a daily request quota per key and per model. Backup keys
+(GEMINI_API_KEY_2, GEMINI_API_KEY_3, ...) and HIRELENS_FALLBACK_MODELS let a
+run carry on when one key's quota runs out.
 
 Any OpenAI-compatible endpoint works. Two presets are provided:
   - gemini (default): Google AI Studio free tier, OpenAI-compatible endpoint
@@ -59,6 +63,18 @@ class Settings:
     max_output_tokens: int | None = None  # hard cap on reply length (some free tiers limit output tokens per minute)
     json_mode: bool = False               # ask the provider for a guaranteed JSON object reply
     extra_body: dict = field(default_factory=dict)  # provider-specific options, e.g. {"reasoning_format": "hidden"}
+    backup_api_keys: list[str] = field(default_factory=list)  # used in turn when a key's daily quota runs out
+    fallback_models: list[str] = field(default_factory=list)  # tried after every key is used up on the main model
+
+    @property
+    def api_keys(self) -> list[str]:
+        """The main key first, then the backups, without blanks or repeats."""
+        keys: list[str] = []
+        for key in [self.api_key or "", *self.backup_api_keys]:
+            key = key.strip()
+            if key and key not in keys:
+                keys.append(key)
+        return keys
 
     def model_for(self, agent: str) -> str:
         return self.agent_models.get(agent) or self.default_model
@@ -73,6 +89,16 @@ def _json_env(name: str) -> dict:
     except json.JSONDecodeError as exc:
         raise ValueError(f"{name} must be a JSON object, e.g. {{\"reasoning_format\": \"hidden\"}}") from exc
     return value if isinstance(value, dict) else {}
+
+
+MAX_BACKUP_KEYS = 5
+
+
+def _backup_keys(key_env: str) -> list[str]:
+    """GEMINI_API_KEY_2 ... GEMINI_API_KEY_6, plus an optional comma-separated GEMINI_API_KEYS."""
+    keys = [os.getenv(f"{key_env}_{i}", "") for i in range(2, MAX_BACKUP_KEYS + 2)]
+    keys += os.getenv(f"{key_env}S", "").split(",")
+    return [k.strip() for k in keys if k.strip()]
 
 
 def load_settings(api_key_override: str | None = None, provider_override: str | None = None) -> Settings:
@@ -100,4 +126,6 @@ def load_settings(api_key_override: str | None = None, provider_override: str | 
         max_output_tokens=int(os.getenv("HIRELENS_MAX_OUTPUT_TOKENS", "0")) or None,
         json_mode=os.getenv("HIRELENS_JSON_MODE", "").strip().lower() in {"1", "true", "yes"},
         extra_body=_json_env("HIRELENS_EXTRA_BODY"),
+        backup_api_keys=[] if api_key_override else _backup_keys(preset["key_env"]),
+        fallback_models=[m.strip() for m in os.getenv("HIRELENS_FALLBACK_MODELS", "").split(",") if m.strip()],
     )

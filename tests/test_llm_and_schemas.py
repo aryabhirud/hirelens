@@ -197,3 +197,80 @@ def test_daily_quota_detection_covers_groq_and_gemini():
     assert is_daily_quota_error(Exception("tokens per day (TPD): Limit 100000"))
     assert is_daily_quota_error(Exception("GenerateRequestsPerDayPerProjectPerModel-FreeTier"))
     assert not is_daily_quota_error(Exception("GenerateRequestsPerMinutePerProjectPerModel-FreeTier"))
+
+
+
+# ------------------------------------------------- backup keys and fallback models
+GEMINI_DAILY = "Error code: 429 - quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+
+
+def _multi_key_client(transports, **settings):
+    """One fake transport per key, so each test can see which key every request went to."""
+    from lib.config import Settings
+
+    keys = list(transports)
+    client = LLMClient(Settings(api_key=keys[0], backup_api_keys=keys[1:], base_url="http://unused",
+                                default_model="m", **settings), max_retries=2)
+    client._clients = {k: type("C", (), {"chat": type("Ch", (), {"completions": t})()})()
+                       for k, t in transports.items()}
+    return client
+
+
+def test_used_up_key_hands_over_to_the_next_key(monkeypatch):
+    monkeypatch.setattr("lib.llm.time.sleep", lambda s: None)
+    first, second = _Raising([_rate_limit(GEMINI_DAILY)]), _Raising(['{"ok": 2}'])
+    client = _multi_key_client({"key-1": first, "key-2": second})
+    assert client.chat_json("orchestrator", "sys", "user") == {"ok": 2}
+    assert len(first.requests) == 1 and len(second.requests) == 1
+    assert client.switches == ["daily quota used up; switched to key #2 on m"]
+
+
+def test_later_runs_start_on_the_key_that_still_works(monkeypatch):
+    monkeypatch.setattr("lib.llm.time.sleep", lambda s: None)
+    first, second = _Raising([_rate_limit(GEMINI_DAILY)]), _Raising(['{"run": 1}', '{"run": 2}'])
+    _multi_key_client({"key-1": first, "key-2": second}).chat_json("matcher", "sys", "user")
+    next_run = _multi_key_client({"key-1": first, "key-2": second})
+    assert next_run.chat_json("matcher", "sys", "user") == {"run": 2}
+    assert len(first.requests) == 1  # the used-up key was not tried again
+
+
+def test_fallback_model_is_tried_after_every_key(monkeypatch):
+    monkeypatch.setattr("lib.llm.time.sleep", lambda s: None)
+    first = _Raising([_rate_limit(GEMINI_DAILY), '{"model": "lite"}'])
+    second = _Raising([_rate_limit(GEMINI_DAILY)])
+    client = _multi_key_client({"key-1": first, "key-2": second}, fallback_models=["m-lite"])
+    assert client.chat_json("critic", "sys", "user") == {"model": "lite"}
+    assert [r["model"] for r in first.requests] == ["m", "m-lite"]
+
+
+def test_all_keys_used_up_stops_with_a_clear_message(monkeypatch):
+    monkeypatch.setattr("lib.llm.time.sleep", lambda s: None)
+    first, second = _Raising([_rate_limit(GEMINI_DAILY)]), _Raising([_rate_limit(GEMINI_DAILY)])
+    client = _multi_key_client({"key-1": first, "key-2": second})
+    with pytest.raises(QuotaExhausted, match="every configured key"):
+        client.chat_json("orchestrator", "sys", "user")
+
+
+def test_wrong_backup_key_is_skipped(monkeypatch):
+    import httpx
+    from openai import AuthenticationError
+
+    monkeypatch.setattr("lib.llm.time.sleep", lambda s: None)
+    request = httpx.Request("POST", "http://unused/chat/completions")
+    bad = AuthenticationError("invalid key", response=httpx.Response(401, request=request), body=None)
+    client = _multi_key_client({"key-1": _Raising([_rate_limit(GEMINI_DAILY)]), "key-2": _Raising([bad]),
+                                "key-3": _Raising(['{"ok": 3}'])})
+    assert client.chat_json("matcher", "sys", "user") == {"ok": 3}
+
+
+def test_backup_keys_and_fallback_models_are_read_from_env(monkeypatch):
+    monkeypatch.delenv("HIRELENS_PROVIDER", raising=False)
+    monkeypatch.delenv("HIRELENS_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "main")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "aryan")
+    monkeypatch.setenv("GEMINI_API_KEY_3", " arun ")
+    monkeypatch.setenv("GEMINI_API_KEYS", "extra, main")
+    monkeypatch.setenv("HIRELENS_FALLBACK_MODELS", "flash-lite, ")
+    settings = load_settings()
+    assert settings.api_keys == ["main", "aryan", "arun", "extra"]
+    assert settings.fallback_models == ["flash-lite"]

@@ -69,12 +69,12 @@ Errors are returned as `{"error": {"message": "..."}}` with 400 (bad input), 413
 pytest -q
 ```
 
-87 tests, no API calls and no network. The suite runs the whole multi-agent graph with a scripted model: critic rejection and revision, the critic's policy override, orchestrator arbitration, a failed URL fetch, careers-page search for a vague job, a non-resume upload, a parser retry with a hint, agent failures. It also covers the HTTP API end to end, including the live event stream and reconnection, plus the tools, schemas and scoring. CI runs it on every push.
+99 tests, no API calls and no network. The suite runs the whole multi-agent graph with a scripted model: critic rejection and revision, the critic's policy override, orchestrator arbitration, a failed URL fetch, careers-page search for a vague job, a non-resume upload, a parser retry with a hint, agent failures. It also covers the HTTP API end to end, including the live event stream and reconnection, plus the tools, schemas and scoring. CI runs it on every push.
 
 ## Deploy (free, on Vercel)
 
 1. Sign in at <https://vercel.com> with GitHub, then **Add New → Project** and import `aryabhirud/hirelens`. Vercel detects FastAPI and uses `index.py` as the entrypoint; `vercel.json` allows a run up to 300 seconds.
-2. Before deploying, open **Environment Variables** and add `GEMINI_API_KEY` (and optionally `HIRELENS_MIN_CALL_INTERVAL` = `4`).
+2. Before deploying, open **Environment Variables** and add `GEMINI_API_KEY` (and optionally `HIRELENS_MIN_CALL_INTERVAL` = `4`). The free tier allows only a few analyses per key per day, so add backup keys from other Google accounts as `GEMINI_API_KEY_2`, `GEMINI_API_KEY_3`: when one key's daily quota runs out, the next one takes over within the same run. `/api/health` shows how many keys are configured.
 3. Click **Deploy**. The app is live at the project's `*.vercel.app` URL, and every push to `main` redeploys it.
 
 Limits on the free plan: one analysis must finish within 5 minutes, and uploads must be under 4.5 MB (the app asks for 4 MB or less).

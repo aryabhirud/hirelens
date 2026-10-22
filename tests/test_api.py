@@ -32,7 +32,7 @@ def _post(client, pdf: bytes | None = None, **form):
 
 def test_health(client):
     body = client.get("/api/health").json()
-    assert body["llm_configured"] is True
+    assert body["llm_configured"] is True and body["api_keys"] == 1
     assert body["agents"] == ["orchestrator", "resume_parser", "job_analyst", "matcher", "critic", "career_coach"]
 
 
