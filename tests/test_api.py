@@ -79,7 +79,7 @@ def test_event_stream_resumes_after_reconnect(client, job_text):
     (None, {}, 400, "job description"),
     (None, {"job_url": "ftp://jobs"}, 400, "http"),
     (b"%PDF" + b"0" * (5 * 1024 * 1024 + 10), {"job_description": "x"}, 413, "larger than 5 MB"),
-])
+], ids=["not-pdf", "missing-job", "invalid-job-url", "oversized-pdf"])
 def test_bad_input_gets_clear_errors(client, pdf, form, status, message):
     res = _post(client, pdf, **form)
     assert res.status_code == status
