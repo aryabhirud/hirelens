@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from agents import job_analyst, resume_parser
 from agents.base import AGENTS, AgentContext, PipelineState, to_prompt_json
-from lib.llm import LLMError
+from lib.llm import LLMError, QuotaExhausted
 
 NAME = "orchestrator"
 MAX_ATTEMPTS = 2  # per worker, including the first run
@@ -149,6 +149,8 @@ def _initial_plan(ctx: AgentContext, state: PipelineState) -> dict:
             notes = {k: str(v) for k, v in (raw.get("notes_for_agents") or {}).items() if k in AGENTS and v}
         else:
             ctx.trace.log(NAME, "warning", f"LLM plan {raw.get('plan')} was invalid; using default order", {})
+    except QuotaExhausted:
+        raise
     except LLMError as exc:
         ctx.trace.log(NAME, "warning", f"Planning call failed ({exc}); using default plan", {})
 
@@ -176,6 +178,8 @@ def _decide(ctx: AgentContext, situation: str, context: dict, options: list[str]
         if action not in options:
             ctx.trace.log(NAME, "warning", f"Chose invalid action {action!r}; falling back to {default}", {})
             action = default
+    except QuotaExhausted:
+        raise
     except LLMError as exc:
         action, reasoning, note = default, f"decision call failed ({exc}); using safe default", ""
     ctx.trace.log(NAME, "plan", f"Re-plan: {situation} → {action}. {reasoning}",

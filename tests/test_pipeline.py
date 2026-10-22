@@ -10,7 +10,7 @@ import pytest
 from tests.conftest import (COACHING, INFLATED_MATCH, JOB_FINISH, PLAN, RESUME_PROFILE, REVISED_MATCH)
 
 from agents.graph import run_pipeline
-from lib.llm import LLMError
+from lib.llm import LLMError, QuotaExhausted
 from lib.schemas import HireLensInput
 from tools.errors import ToolError
 
@@ -176,3 +176,19 @@ def test_trace_exports_as_json_and_markdown(make_ctx, resume_text, job_text):
     assert data["event_count"] == len(data["events"]) > 10
     assert data["events"][-1]["event"] == "final"
     assert "| orchestrator |" in ctx.trace.to_markdown()
+
+
+def test_daily_quota_stops_the_whole_run_immediately(make_ctx, resume_text, job_text):
+    """No fallback plan, no retries of other agents: every one of them would hit the same wall."""
+    ctx, llm = make_ctx(_happy_script(orchestrator=[QuotaExhausted("daily quota used up")]))
+    with pytest.raises(QuotaExhausted):
+        run_pipeline(_input(resume_text, job_text), ctx)
+    assert len(llm.calls) == 1
+    assert _events(ctx, "error", "orchestrator")
+
+
+def test_daily_quota_in_a_worker_stops_the_run(make_ctx, resume_text, job_text):
+    ctx, llm = make_ctx(_happy_script(resume_parser=[QuotaExhausted("daily quota used up")]))
+    with pytest.raises(QuotaExhausted):
+        run_pipeline(_input(resume_text, job_text), ctx)
+    assert llm.count("resume_parser") == 1 and llm.count("matcher") == 0
