@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TD
     U(["User: resume PDF + job text and/or URL"]) --> UI["Web app (web/)"]
-    UI -- "POST /api/runs" --> API["FastAPI (server/)<br/>pdf_tool: PDF → text"]
+    UI -- "POST /api/analyze" --> API["FastAPI (server/)<br/>pdf_tool: PDF → text"]
     API --> O
     TR -. "Server-Sent Events" .-> UI
 
@@ -104,7 +104,7 @@ If more than half of the must-have requirements are missing, the overall score i
 | **Pydantic** | Every agent-to-agent message is schema-validated; malformed LLM output is caught at the boundary and retried. |
 | **Deterministic tools for verification** | The Critic's checks (`verify_evidence`, `keyword_coverage`) are plain code, so an LLM cannot talk its way past them. |
 | **pypdf, requests + BeautifulSoup, DuckDuckGo search (`ddgs`)** | Free, no extra API keys needed for PDF reading, page fetching and web search. |
-| **FastAPI backend + plain HTML/CSS/JS frontend, one Docker service** | The backend runs each analysis in the background and streams every trace event to the browser over Server-Sent Events, so users watch the agents work live (and the stream resumes after a dropped connection). A no-build frontend keeps deployment to a single container and a single URL. Deployed free on Hugging Face Spaces. |
+| **FastAPI backend + plain HTML/CSS/JS frontend, deployed on Vercel** | Each analysis runs inside one request whose response streams every trace event to the browser over Server-Sent Events, so users watch the agents work live. Because a run never depends on a second request reaching the same server, it fits Vercel's serverless functions (up to 300 s per run on the free plan). A no-build frontend keeps it to one deployment and one URL; a Dockerfile is kept for other hosts. |
 | **pytest + GitHub Actions** | Tests run the whole multi-agent graph and the HTTP API with a scripted model, so routing, the critic loop, failure handling and the live event stream are tested without API calls. |
 
 ## 7. Robustness
@@ -114,12 +114,13 @@ If more than half of the must-have requirements are missing, the overall score i
 - **Tool failures:** a failed fetch or search is fed back to the Job Analyst as an observation, and it chooses another approach.
 - **LLM failures:** rate limits are retried with backoff; invalid JSON is sent back to the model for repair; schema-invalid output is retried once with the validation error.
 - **Partial failure:** if the Critic fails, scores are shown marked unverified; if the Coach fails, the scores are still returned.
-- **Loops are bounded:** at most 2 revisions, at most 4 analyst tool steps, at most 2 attempts per agent, and a LangGraph recursion limit.
+- **Loops are bounded:** at most 2 revisions, at most 4 analyst tool steps, at most 2 attempts per agent, and a LangGraph recursion limit, so a run finishes well inside the hosting time limit. If the connection still closes early, the browser says so instead of waiting forever.
 
 ## 8. Repository map
 
 ```
-server/                 FastAPI app: uploads, background runs, live event stream (SSE), downloads
+index.py, vercel.json   Vercel entrypoint and function settings
+server/                 FastAPI app: uploads, streaming analysis (SSE), background runs, downloads
 web/                    frontend: intake, live agent map, report
 agents/                 orchestrator, resume_parser, job_analyst, matcher, critic, career_coach, graph wiring
 tools/                  pdf_tool, web_tool (fetch_url, web_search), text_tools (verify_evidence, keyword_coverage)

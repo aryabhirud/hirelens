@@ -5,7 +5,7 @@ Both contracts are Pydantic models in `lib/schemas.py`. The exact JSON Schemas a
 
 ## Input
 
-What the user provides in the web app: a resume PDF (≤ 5 MB, text-based) and a job description, a job posting URL, or both. The browser sends them to `POST /api/runs` as `multipart/form-data` (fields `resume`, `job_description`, `job_url`). The backend extracts the PDF text and passes this object to the agents:
+What the user provides in the web app: a resume PDF (text-based; the web app accepts up to 4 MB, the API up to 5 MB) and a job description, a job posting URL, or both. The browser sends them to `POST /api/analyze` as `multipart/form-data` (fields `resume`, `job_description`, `job_url`). The backend extracts the PDF text and passes this object to the agents:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -58,7 +58,7 @@ A `FitReport`:
 | `coaching` | object \| null | `bullet_suggestions[{original, improved, targets}]`, `interview_questions[{question, category, why_asked}]`, `gap_actions[{gap, action}]` |
 | `warnings` | string[] | Degradations during the run (e.g. coach unavailable) |
 
-The browser receives the report at the end of the live event stream (`GET /api/runs/{id}/events`, event `done`) and can download it from `/api/runs/{id}/report`. `critic_history` and `score_history` let the UI show which scores the Critic corrected.
+`POST /api/analyze` answers with a stream of Server-Sent Events: `started` (run id), one `trace` event per agent step, then `done` with `status`, `report`, the full `trace` and `trace_markdown`. The browser builds the report and trace downloads from that final event. `critic_history` and `score_history` let the UI show which scores the Critic corrected.
 
 Alongside the report, every run produces an **execution trace** (`trace.json` / `trace.md`) with each event: `step, timestamp, elapsed_s, agent, event (input|plan|decision|tool_call|tool_result|message|handoff|critique|revision|warning|error|final), summary, data`.
 
