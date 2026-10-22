@@ -138,3 +138,13 @@ COACHING = {
                              "why_asked": "SQL must-have"}],
     "gap_actions": [{"gap": "Kafka", "action": "Add a small producer/consumer to CampusEats"}],
 }
+
+
+@pytest.fixture(autouse=True)
+def _fresh_quota_memory():
+    """The client remembers used-up keys for the whole process; start every test clean."""
+    from lib import llm
+
+    llm._EXHAUSTED.clear()
+    yield
+    llm._EXHAUSTED.clear()

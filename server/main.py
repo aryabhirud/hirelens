@@ -69,9 +69,11 @@ def health() -> dict:
     settings: Settings = app.state.settings_loader()
     return {
         "ok": True,
-        "llm_configured": bool(settings.api_key),
+        "llm_configured": bool(settings.api_keys),
         "provider": settings.provider,
         "model": settings.default_model,
+        "api_keys": len(settings.api_keys),  # how many keys can take over when one's daily quota runs out
+        "fallback_models": settings.fallback_models,
         "agents": ["orchestrator", *AGENTS],
         "active_runs": app.state.store.active(),
     }
@@ -95,7 +97,7 @@ def sample_resume() -> Response:
 async def _prepare_run(request: Request, resume: UploadFile, job_description: str, job_url: str):
     """Validate the upload and job input; return (input, client id, settings) or raise a clear HTTP error."""
     settings: Settings = app.state.settings_loader()
-    if not settings.api_key:
+    if not settings.api_keys:
         raise _error(503, "The server has no model API key configured. Add GEMINI_API_KEY to the environment.")
 
     job_description, job_url = job_description.strip()[:MAX_JD_CHARS], job_url.strip()
